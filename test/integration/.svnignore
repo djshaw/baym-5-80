@@ -1,0 +1,4 @@
+# $ svn propset svn:ignore -F .svnignore .
+*.class
+jboss-logging
+prometheus-scraper

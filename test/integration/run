@@ -1,0 +1,97 @@
+#!/bin/bash
+
+set -x
+set -e
+set -o pipefail
+
+SOCAT_PID=0
+JAVA_PID=0
+POWERMONITORING_PID=0
+function cleanup()
+{
+    if [[ $POWERMONITORING_PID != 0 ]] ; then
+        kill $POWERMONITORING_PID || true
+        wait $POWERMONITORING_PID || true
+    fi
+    if [[ $JAVA_PID != 0 ]] ; then
+        kill $JAVA_PID || true
+        wait $JAVA_PID || true
+    fi
+
+    if [[ $SOCAT_PID != 0 ]] ; then
+        kill $SOCAT_PID || true
+        wait $SOCAT_PID || true
+    fi
+}
+
+trap cleanup EXIT
+
+socat PTY,raw,echo=0,cs8,link=COM8 PTY,raw,echo=0,cs8,link=COM9 &
+# TODO: find something to wait on, rather than sleep on
+sleep 1
+SOCAT_PID=$!
+
+java Main < COM8 > COM8 &
+JAVA_PID=$!
+
+LD_LIBRARY_PATH=../../lib.$( uname -m ) ../../powermonitoring COM9 &
+POWERMONITORING_PID=$!
+# TODO: find something to wait on, rather than sleep on
+sleep 1
+
+JSON=$( java -cp prometheus-scraper/target/classes:jboss-logging/target/classes \
+             prometheus.PrometheusScraperCli --json \
+                                             http://localhost:8080/metrics )
+
+ONE_FAILURE=false
+function fail()
+{
+    if [[ "$TERM" != "" && $( tput colors 2> /dev/null ) -gt 0 ]] ; then
+        echo -e "\e[31mFAILED\e[0m"
+    else
+        echo "FAILED"
+    fi
+
+    ONE_FAILURE=true
+}
+
+function exit_on_failure()
+{
+    fail
+    exit 1
+}
+
+function success()
+{
+    if [[ "$TERM" != "" && $( tput colors 2> /dev/null ) -gt 0 ]] ; then
+        echo -e "\e[32mSUCCESS\e[0m"
+    else
+        echo "SUCCESS"
+    fi
+}
+
+# Too much noise with `echo $JSON`. Disable outputting each command for the time being
+set +x
+    # TODO: support multiple addresses
+    echo -n "Voltage... "
+    # TODO: the magic values are duplicated in Main.java and here. Find a way
+    # to specifiy the magic values on the command line to keep all the magic
+    # values only defined in one spot.
+    [[ "$( echo $JSON | yq '.[] | select( .name == "voltage") | .metrics[].value' )" == "120.000000" ]] && success || fail
+
+    echo -n "Current... "
+    [[ "$( echo $JSON | yq '.[] | select( .name == "current") | .metrics[].value' )" == "1.000000" ]] && success || fail
+
+    echo -n "Active power... "
+    [[ "$( echo $JSON | yq '.[] | select( .name == "power") | .metrics[].value' )" == "2.000000" ]] && success || fail
+
+    echo -n "Reactive power... "
+    [[ "$( echo $JSON | yq '.[] | select( .name == "reactivePower") | .metrics[].value' )" == "3.000000" ]] && success || fail
+set -x
+
+if [ "$ONE_FAILURE" == "true" ] ; then
+    exit 1
+fi
+
+# TODO: run until user input, so the metrics can be manually investigated?
+
