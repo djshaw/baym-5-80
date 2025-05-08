@@ -63,5 +63,26 @@ public class CRC16
 	{
 		return new byte[]{ (byte)(m_crc & 0xFF), (byte)((m_crc >>> 8) & 0xFF) };
 	}
+
+	public static void main( String[] args )
+		throws Exception
+	{
+		// Test with:
+		// 	echo "0401000A000D" | xxd -r -p | java -cp . CRC16 | xxd
+		//
+		// The output should be DD98
+		CRC16 crc = new CRC16();
+		byte[] bytes = new byte[256];
+		while( true )
+		{
+			int read = System.in.read( bytes );
+			if( read == -1 )
+			{
+				break;
+			}
+			crc.update( bytes, read );
+		}
+		System.out.write( crc.getValue() );
+	}
 }
 
